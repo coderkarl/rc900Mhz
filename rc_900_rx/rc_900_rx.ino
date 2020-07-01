@@ -24,21 +24,25 @@ RH_RF95 rf95(RFM95_CS, RFM95_INT);
 #define LED 13
 
 //////////////////////PPM CONFIGURATION///////////////////////////////
-// Based off of https://github.com/DzikuVx/ppm_encoder
-#define CHANNEL_NUMBER 8  //set the number of channels
-#define CHANNEL_DEFAULT_VALUE 1500  //set the default servo value
-#define FRAME_LENGTH 20000  //set the PPM frame length in microseconds (1ms = 1000µs)
-#define PULSE_LENGTH 400  //set the pulse length
-#define onState 0  //set polarity of the pulses: 1 is positive, 0 is negative
-#define sigPin 10  //set PPM signal output pin on the arduino
+#define NUM_CHANNELS 8
+#define FRAME_LENGTH 20000
+#define DEFAULT_PULSE_LENGTH 1500
+#define PULSE_LOW_LENGTH 400
+// NOTE: the output pin must be Arduino pin 5 on a Feather32U4 (or Leonardo)
+#define sigPin 5  //set PPM signal output pin on the arduino
 
 /*this array holds the servo values for the ppm signal
  change theese values in your code (usually servo values move between 1000 and 2000)*/
-int ppm[CHANNEL_NUMBER];
+uint16_t ppm[NUM_CHANNELS];
 //////////////////////////////////////////////////////////////////
+
+#define PACKET_TIMEOUT 300
+long timeNewPacket;
 
 void setup()
 {
+  timeNewPacket = millis();
+  
   pinMode(LED, OUTPUT);
   pinMode(RFM95_RST, OUTPUT);
   digitalWrite(RFM95_RST, HIGH);
@@ -84,27 +88,41 @@ void setup()
   // 1 - Right Vert, fwd/rev
   // 2 - Left Vert, throttle, auto mode
   // 3 - Left Horz, blade deadman switch
-  for(int i=0; i<CHANNEL_NUMBER; i++){
-    ppm[i]= CHANNEL_DEFAULT_VALUE;
-  }
 
   pinMode(sigPin, OUTPUT);
-  digitalWrite(sigPin, !onState);  //set the PPM signal pin to the default state (off)
-  
+  digitalWrite(sigPin, HIGH);
+
   cli();
-  TCCR3A = 0; // set entire TCCR1 register to 0
-  TCCR3B = 0;
-  
-  OCR3A = 100;  // compare match register, change this
-  TCCR3B |= (1 << WGM32);  // turn on CTC mode
-  TCCR3B |= (1 << CS31);  // 8 prescaler: 0,5 microseconds at 16mhz
-  TIMSK3 |= (1 << OCIE3A); // enable timer compare interrupt
+  for(int i = 0; i < NUM_CHANNELS; ++i){
+    ppm[i]= DEFAULT_PULSE_LENGTH;
+  }
+
+  // Stop the timer/counter
+  TCCR3A = TCCR3B = 0;
+  // Set the low pulse length.  This will never change.
+  OCR3A = PULSE_LOW_LENGTH;
+  // Time until first falling edge, can be any value greater than PULSE_LOW_LENGTH.
+  ICR3 = PULSE_LOW_LENGTH + 1;
+  // Clear the count
+  TCNT3 = 0;
+  // Fast PWM; TOP = ICR3; set OC3A on compare match, clear on TOP; prescale = /8 (1MHz on Feather32u4)
+  TCCR3A = _BV(COM3A1) | _BV(COM3A0) | _BV(WGM31);
+  TCCR3B = _BV(WGM33) | _BV(WGM32) | _BV(CS31);
+  // Clear any pending timer overflow interrupt flag
+  TIFR3 = _BV(TOV3);
+  // Interrupt on overflow (at TOP, immediately after falling edge)
+  TIMSK3 = _BV(TOIE3);
   sei();
   //////////////////////////////////////////////////////////////
 }
 
 void loop()
 {
+  if(timeSince(timeNewPacket) > PACKET_TIMEOUT)
+  {
+    set_default_ppm();
+  }
+  
   if (rf95.available())
   {
     // Should be a message for us now
@@ -133,10 +151,13 @@ void loop()
           {
             pulse_val = 1999;
           }
+          cli();
           ppm[k] = pulse_val; //Consider hard coding to 1500 and see if it removes hiccups
+          sei();
           Serial.print(pulse_val);
           Serial.print(",");
         }
+        timeNewPacket = millis();
       }
       
       Serial.println();
@@ -162,32 +183,38 @@ void loop()
   }
 }
 
-ISR(TIMER3_COMPA_vect){
-  static boolean state = true;
-  
-  TCNT3 = 0;
-  
-  if (state) {  //start pulse
-    digitalWrite(sigPin, onState);
-    OCR3A = PULSE_LENGTH;
-    state = false;
-  } else{  //end pulse and calculate when to start the next pulse
-    static byte cur_chan_numb;
-    static unsigned int calc_rest;
-  
-    digitalWrite(sigPin, !onState);
-    state = true;
+uint16_t timeSince(uint16_t startTime)
+{
+  return (uint16_t)(millis() - startTime);
+}
 
-    if(cur_chan_numb >= CHANNEL_NUMBER){
-      cur_chan_numb = 0;
-      calc_rest = calc_rest + PULSE_LENGTH;// 
-      OCR3A = (FRAME_LENGTH - calc_rest);
+void set_default_ppm()
+{
+  cli();
+  for(int i = 0; i < NUM_CHANNELS; ++i){
+    ppm[i]= DEFAULT_PULSE_LENGTH;
+  }
+  sei();
+}
+
+// The Overflow interrupt occurs when the counter reaches the TOP value in ICR3.
+// The hardware automatically emits a falling edge at this time.
+// The hardware will automatically emit a rising edge later based on the value in OCR3A.
+// The ISR just needs to store the time of the next falling edge in ICR3.
+ISR(TIMER3_OVF_vect){
+    static byte cur_chan_num = 0;
+    static unsigned int calc_rest = 0;  // Microseconds since start of frame
+  
+    if(cur_chan_num >= NUM_CHANNELS){
+      // If all channels have been output, then idle for the remainder of the frame
+      ICR3 = FRAME_LENGTH - calc_rest;
+      cur_chan_num = 0;
       calc_rest = 0;
     }
     else{
-      OCR3A = (ppm[cur_chan_numb] - PULSE_LENGTH);
-      calc_rest = calc_rest + ppm[cur_chan_numb];
-      cur_chan_numb++;
+      // Set the time for the next falling edge.
+      ICR3 = ppm[cur_chan_num];
+      calc_rest += ppm[cur_chan_num];
+      cur_chan_num++;
     }     
-  }
 }
