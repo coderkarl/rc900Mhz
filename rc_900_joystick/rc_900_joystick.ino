@@ -22,19 +22,22 @@ RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
 #define RC_PACKET_SIZE 10
 
+#define SHOW_SERIAL 0
+
 void setup() 
 {
   pinMode(RFM95_RST, OUTPUT);
   digitalWrite(RFM95_RST, HIGH);
 
-  Serial.begin(115200);
-  /*while (!Serial) {
-    delay(1);
-  }*/
+  if(SHOW_SERIAL)
+  {
+    Serial.begin(115200);
+    while (!Serial) {
+      delay(1);
+    }
+  }
 
   delay(100);
-
-  Serial.println("Feather LoRa TX Test!");
 
   // manual reset
   digitalWrite(RFM95_RST, LOW);
@@ -43,18 +46,26 @@ void setup()
   delay(10);
 
   while (!rf95.init()) {
-    Serial.println("LoRa radio init failed");
-    Serial.println("Uncomment '#define SERIAL_DEBUG' in RH_RF95.cpp for detailed debug info");
+    if(SHOW_SERIAL)
+    {
+      Serial.println("LoRa radio init failed");
+      Serial.println("Uncomment '#define SERIAL_DEBUG' in RH_RF95.cpp for detailed debug info");
+    }
     while (1);
   }
-  Serial.println("LoRa radio init OK!");
 
   // Defaults after init are 434.0MHz, modulation GFSK_Rb250Fd250, +13dbM
   if (!rf95.setFrequency(RF95_FREQ)) {
-    Serial.println("setFrequency failed");
+    if(SHOW_SERIAL)
+    {
+      Serial.println("setFrequency failed");
+    }
     while (1);
   }
-  Serial.print("Set Freq to: "); Serial.println(RF95_FREQ);
+  if(SHOW_SERIAL)
+  {
+    Serial.print("Set Freq to: "); Serial.println(RF95_FREQ);
+  }
   
   // Defaults after init are 434.0MHz, 13dBm, Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on
 
@@ -69,11 +80,26 @@ bool send_joy_data = true;
 
 void loop()
 {
-  delay(30);
-  Serial.println("Transmitting..."); // Send a message to rf95_server
+  delay(10);
+  //Serial.println("Transmitting..."); // Send a message to rf95_server
+  analogRead(A0);
   int16_t joy_x_right = 3000 - min(analogRead(A0)/1024.0*1000.0+1000, 2000);
+  delay(10);
+  analogRead(A1);
   int16_t joy_y_right = min(analogRead(A1)/1024.0*1000.0+1000, 2000);
+  if(abs(joy_x_right - 1500) > 150)
+  {
+    joy_y_right = 1500 + (joy_y_right - 1500)/3;
+  }
+  else
+  {
+    joy_y_right = 1500 + (joy_y_right - 1500)/2;
+  }
+  delay(10);
+  analogRead(A2);
   int16_t joy_x_left = 3000 - min(analogRead(A2)/1024.0*1000.0+1000, 2000);
+  delay(10);
+  analogRead(A3);
   int16_t joy_y_left = min(analogRead(A3)/1024.0*1000.0+1000, 2000);
   int16_t joysig[] = {joy_y_right, joy_x_right, joy_x_left, joy_y_left};
   int n = 0;
@@ -95,7 +121,13 @@ void loop()
     radiopacket[2*k+2] = (joysig[k] >> 8) & 0xFF;
     radiopacket[2*k+3] = (joysig[k]) & 0xFF;
     all_neutral = all_neutral && (abs(joysig[k] - 1500) < 20);
+    if(SHOW_SERIAL)
+    {
+      Serial.print(joysig[k]);
+      Serial.print(",");
+    }
   }
+  if(SHOW_SERIAL){Serial.println();}
 
   if(!all_neutral)
   {
@@ -104,11 +136,11 @@ void loop()
 
   if(send_joy_data)
   {
-    Serial.println("Sending...");
+    //Serial.println("Sending...");
     delay(5);
     rf95.send((uint8_t *)radiopacket, RC_PACKET_SIZE);
   
-    Serial.println("Waiting for packet to complete..."); 
+    //Serial.println("Waiting for packet to complete..."); 
     delay(5);
     rf95.waitPacketSent();
     // Now wait for a reply
