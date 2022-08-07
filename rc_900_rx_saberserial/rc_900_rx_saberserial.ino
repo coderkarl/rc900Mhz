@@ -49,12 +49,11 @@ long timeCMD;
 
 /*this array holds the servo values for the ppm signal
  change theese values in your code (usually servo values move between 1000 and 2000)*/
-#define NUM_CHANNELS 8
+#define NUM_CHANNELS 4
 #define DEFAULT_PULSE_LENGTH 1500
 volatile uint16_t ppm[NUM_CHANNELS];
 
 //////////////////////PPM CONFIGURATION///////////////////////////////
-#define NUM_CHANNELS 8
 #define FRAME_LENGTH 20000
 #define DEFAULT_PULSE_LENGTH 1500
 #define PULSE_LOW_LENGTH 400
@@ -65,11 +64,20 @@ volatile uint16_t ppm[NUM_CHANNELS];
 #define PACKET_TIMEOUT 300
 long timeNewPacket;
 
+//*****************ENCODERS****************
+#include <YetAnotherPcInt.h>
+#define RIGHT_ENC_A 11 //A0, 7
+#define RIGHT_ENC_B 10 //A1, 6
+#define LEFT_ENC_A 9 //A2, 5
+#define LEFT_ENC_B 6 //A3, 4
+volatile int16_t enc_left = 0, enc_right = 0;
+
 void setup()
 {
   timeNewPacket = millis();
   
   pinMode(LED, OUTPUT);
+  digitalWrite(LED, HIGH);
   pinMode(RFM95_RST, OUTPUT);
   digitalWrite(RFM95_RST, HIGH);
 
@@ -145,6 +153,14 @@ void setup()
   TIMSK3 = _BV(TOIE3);
   sei();
   //////////////////////////////////////////////////////////////
+
+  //ENCODERS
+  pinMode(LEFT_ENC_A, INPUT);
+  pinMode(LEFT_ENC_B, INPUT);
+  pinMode(RIGHT_ENC_A, INPUT);
+  pinMode(RIGHT_ENC_B, INPUT);
+  PcInt::attachInterrupt(RIGHT_ENC_A, right_enc_tick, CHANGE);
+  PcInt::attachInterrupt(LEFT_ENC_A, left_enc_tick, CHANGE);
 }
 
 void loop()
@@ -157,10 +173,12 @@ void loop()
   if(millis() - timeCMD > CMD_PERIOD)
   {
     timeCMD = millis();
-    steer_pwm = ppm[RC_STEER];
-    speed_pwm = ppm[RC_SPEED];
-    blade_pwm = ppm[RC_BLADE];
-    auto_pwm = ppm[RC_AUTO];
+    Serial.print(enc_left); Serial.print(",");
+    Serial.print(enc_right); Serial.print(",");
+    steer_pwm = ppm[RC_STEER]; Serial.print(steer_pwm); Serial.print(",");
+    speed_pwm = ppm[RC_SPEED]; Serial.print(speed_pwm); Serial.print(",");
+    blade_pwm = ppm[RC_BLADE]; Serial.print(blade_pwm); Serial.print(",");
+    auto_pwm = ppm[RC_AUTO]; Serial.println(auto_pwm);
     
     if(auto_pwm < 1700)
     {
@@ -189,14 +207,14 @@ void loop()
     if (rf95.recv(buf, &len))
     {
       //digitalWrite(LED, HIGH);
-      RH_RF95::printBuffer("Received: ", buf, len);
+      //RH_RF95::printBuffer("Received: ", buf, len);
       if(buf[0] == 0xCC && buf[1] == 0xAA)
       {
         for(int k=0; k<4; ++k)
         {
-          int16_t pulse_val = buf[2*k+2]*255 + buf[2*k+3]; //1000 to 2000
+          int16_t pulse_val = buf[2*k+2]*256 + buf[2*k+3]; //1000 to 2000
           
-          if(pulse_val < 990 || pulse_val > 2010)
+          if(pulse_val < 900 || pulse_val > 2010)
           {
             pulse_val = 1500;
           }
@@ -212,13 +230,13 @@ void loop()
           ppm[k] = pulse_val; //Consider hard coding to 1500 and see if it removes hiccups
           sei();
           
-          Serial.print(pulse_val);
-          Serial.print(",");
+          //Serial.print(pulse_val);
+          //Serial.print(",");
         }
         timeNewPacket = millis();
       }
       
-      Serial.println();
+      //Serial.println();
       //Serial.print("Got: ");
       //Serial.println((char*)buf);
       //Serial.print("RSSI: ");
@@ -275,4 +293,33 @@ ISR(TIMER3_OVF_vect){
       calc_rest += ppm[cur_chan_num];
       cur_chan_num++;
     }     
+}
+
+// enc_tick() functions only count half of quadrature counts
+//*************************************************************************************
+void left_enc_tick()
+{
+  // modify using PORT operations for efficiency
+  if(digitalRead(LEFT_ENC_A) != digitalRead(LEFT_ENC_B))
+  {
+    enc_left--;
+  }
+  else
+  {
+    enc_left++;
+  }
+}
+
+//*************************************************************************************
+void right_enc_tick()
+{
+  // modify using PORT operations for efficiency
+  if(digitalRead(RIGHT_ENC_A) != digitalRead(RIGHT_ENC_B))
+  {
+    enc_right--;
+  }
+  else
+  {
+    enc_right++;
+  }
 }
