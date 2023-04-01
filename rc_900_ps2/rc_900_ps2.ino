@@ -35,6 +35,17 @@ bool set_neutral = true;
 int16_t trim_rx = INIT_TRIM_RX;
 int16_t trim_ry = INIT_TRIM_RY;
 
+unsigned blade_db_count = 0;
+unsigned auto_db_count = 0;
+unsigned blade_off_count = 0;
+unsigned auto_off_count = 0;
+bool blade_active = false;
+bool auto_active = false;
+bool blade_press = false;
+bool auto_press = false;
+
+unsigned x_db_count = 0;
+
 void setup() 
 {
   pinMode(RFM95_RST, OUTPUT);
@@ -157,8 +168,65 @@ void loop()
     //int16_t joy_y_left = 3000 - (ps2x.Analog(PSS_LY)/255.0*1000.0+1000); // (0 to 255) -> (1000 to 2000
     joysig[0] = joy_x_right; //steer
     joysig[1] = joy_y_right; //speed
-    joysig[2] = (ps2x.Button(PSB_R2)) ? 1900 : 1500;
-    joysig[3] = (ps2x.Button(PSB_R1)) ? 1010 : 1500;
+    if(!auto_press && ps2x.Button(PSB_R2))
+    {
+      ++auto_db_count;
+      if(auto_db_count > 1)
+      {
+        auto_press = true;
+        auto_off_count = 0;
+      }
+    }
+    else if(auto_press && !ps2x.Button(PSB_R2))
+    {
+      ++auto_off_count;
+      if(auto_off_count > 1)
+      {
+        auto_press = false;
+        auto_active = !auto_active;
+        Serial.print("AUTO: "); Serial.println(auto_active);
+        auto_db_count = 0;
+      }
+    }
+    
+    if(!blade_press && ps2x.Button(PSB_R1))
+    {
+      ++blade_db_count;
+      if(blade_db_count > 1)
+      {
+        blade_press = true;
+        blade_off_count = 0;
+      }
+    }
+    else if(blade_press && !ps2x.Button(PSB_R1))
+    {
+      ++blade_off_count;
+      if(blade_off_count > 1)
+      {
+        blade_press = false;
+        blade_active = !blade_active;
+        Serial.print("BLADE: "); Serial.println(blade_active);
+        blade_db_count = 0;
+      }
+    }
+
+    if(ps2x.Button(PSB_CROSS))
+    {
+      ++x_db_count;
+      if(x_db_count > 1)
+      {
+        blade_active = false;
+        auto_active = false;
+        Serial.println("BLADE AND AUTO OFF");
+      }
+    }
+    else
+    {
+      x_db_count = 0;
+    }
+    
+    joysig[2] = auto_active ? 1900 : 1500;
+    joysig[3] = blade_active ? 1010 : 1500;
     //joysig[2] = joy_y_left; //auto
     //joysig[3] = joy_x_left; // blade
   }
