@@ -21,6 +21,7 @@
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
 #define RC_PACKET_SIZE 10
+#define MOW_AREA_PACKET_SIZE 4
 
 #define SHOW_SERIAL 0
 
@@ -43,6 +44,7 @@ bool blade_active = false;
 bool auto_active = false;
 bool blade_press = false;
 bool auto_press = false;
+bool send_mow_area = false;
 
 unsigned x_db_count = 0;
 
@@ -118,6 +120,7 @@ void setup()
 
 int16_t packetnum = 0;  // packet counter, we increment per xmission
 bool send_joy_data = true;
+uint8_t mow_area = 0;
 
 void loop()
 {
@@ -148,9 +151,26 @@ void loop()
       if(ps2x.Button(PSB_PAD_RIGHT)){trim_rx += 2;}
       if(ps2x.Button(PSB_PAD_LEFT)){trim_rx -= 2;}
 
-      if(ps2x.Button(PSB_SELECT)) {
-        trim_rx = INIT_TRIM_RX;
-        trim_ry = INIT_TRIM_RY;
+      if(!auto_active) {
+        if(ps2x.Button(PSB_SELECT)) {
+          trim_rx = INIT_TRIM_RX;
+          trim_ry = INIT_TRIM_RY;
+          mow_area = 0;
+          send_mow_area = true;
+        }
+  
+        if(ps2x.Button(PSB_SQUARE)) {
+          mow_area = 1;
+          send_mow_area = true;
+        }
+        else if(ps2x.Button(PSB_TRIANGLE)) {
+          mow_area = 2;
+          send_mow_area = true;
+        }
+        else if(ps2x.Button(PSB_CIRCLE)) {
+          mow_area = 3;
+          send_mow_area = true;
+        }
       }
     }
     
@@ -255,7 +275,7 @@ void loop()
     send_joy_data = true;
   }
 
-  if(send_joy_data)
+  if(send_joy_data && !send_mow_area)
   {
     //Serial.println("Sending...");
     delay(5);
@@ -271,6 +291,24 @@ void loop()
   if(all_neutral)
   {
     send_joy_data = false;
+  }
+  
+  if(!auto_active && send_mow_area)
+  {
+    char mowpacket[MOW_AREA_PACKET_SIZE];
+    mowpacket[0] = 0xCC;
+    mowpacket[1] = 0xAB;
+    mowpacket[2] = 0;
+    mowpacket[3] = mow_area;
+    send_mow_area = false;
+    
+    Serial.print("mow area: ");
+    Serial.println(mow_area);
+    delay(5);
+    rf95.send((uint8_t *)mowpacket, MOW_AREA_PACKET_SIZE);
+    //Serial.println("Waiting for packet to complete..."); 
+    delay(5);
+    rf95.waitPacketSent();
   }
 
   /*Serial.println("Waiting for reply...");
