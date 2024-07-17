@@ -45,6 +45,8 @@ bool auto_active = false;
 bool blade_press = false;
 bool auto_press = false;
 bool send_mow_area = false;
+bool waypoints_active = false;
+bool first_waypoint = true;
 
 unsigned x_db_count = 0;
 
@@ -122,6 +124,10 @@ int16_t packetnum = 0;  // packet counter, we increment per xmission
 bool send_joy_data = true;
 uint8_t mow_area = 0;
 
+// 0 - not a waypoint, 1 - first waypoint, 2 - other waypoint, 3 - exit waypoints mode
+uint8_t waypoint_type = 0;
+bool set_waypoint = false;
+
 void loop()
 {
   delay(50);
@@ -146,10 +152,28 @@ void loop()
 
     if (ps2x.NewButtonState())  //will be TRUE if any button changes state (on to off, or off to on)
     {
-      if(ps2x.Button(PSB_PAD_UP)){trim_ry += 2;}
-      if(ps2x.Button(PSB_PAD_DOWN)){trim_ry -= 2;}
-      if(ps2x.Button(PSB_PAD_RIGHT)){trim_rx += 2;}
-      if(ps2x.Button(PSB_PAD_LEFT)){trim_rx -= 2;}
+      if(!auto_active && !waypoints_active && ps2x.Button(PSB_START)) {
+        waypoints_active = true;
+        first_waypoint = true;
+      }
+      
+      if(!waypoints_active) {
+        if(ps2x.Button(PSB_PAD_UP)){trim_ry += 2;}
+        if(ps2x.Button(PSB_PAD_DOWN)){trim_ry -= 2;}
+        if(ps2x.Button(PSB_PAD_RIGHT)){trim_rx += 2;}
+        if(ps2x.Button(PSB_PAD_LEFT)){trim_rx -= 2;}
+      }
+      else {
+        if(ps2x.Button(PSB_PAD_DOWN)){
+          set_waypoint = true;
+          waypoint_type = first_waypoint ? 1 : 2;
+        }
+        if(ps2x.Button(PSB_L2)){
+          set_waypoint = true;
+          waypoints_active = false;
+          waypoint_type = 3;
+        }
+      }
 
       if(!auto_active) {
         if(ps2x.Button(PSB_SELECT)) {
@@ -188,7 +212,7 @@ void loop()
     //int16_t joy_y_left = 3000 - (ps2x.Analog(PSS_LY)/255.0*1000.0+1000); // (0 to 255) -> (1000 to 2000
     joysig[0] = joy_x_right; //steer
     joysig[1] = joy_y_right; //speed
-    if(!auto_press && ps2x.Button(PSB_R2))
+    if(!waypoints_active && !auto_press && ps2x.Button(PSB_R2))
     {
       ++auto_db_count;
       if(auto_db_count > 1)
@@ -293,14 +317,21 @@ void loop()
     send_joy_data = false;
   }
   
-  if(!auto_active && send_mow_area)
+  if(!auto_active && (send_mow_area || set_waypoint) )
   {
     char mowpacket[MOW_AREA_PACKET_SIZE];
     mowpacket[0] = 0xCC;
     mowpacket[1] = 0xAB;
-    mowpacket[2] = 0;
+    if(set_waypoint) {
+      mowpacket[2] = waypoint_type;
+      first_waypoint = false;
+    } else {
+      mowpacket[2] = 0;
+    }
     mowpacket[3] = mow_area;
     send_mow_area = false;
+    set_waypoint = false;
+    waypoint_type = 0;
     
     Serial.print("mow area: ");
     Serial.println(mow_area);
